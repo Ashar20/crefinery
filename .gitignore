@@ -1,0 +1,5 @@
+/contracts/lib
+/cre/contracts/node_modules
+/cre/my-workflow/node_modules
+/cre/proof-generator/node_modules
+/cre/session-evaluator/node_modules
