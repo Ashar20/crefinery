@@ -1,0 +1,24 @@
+# ==========================================================================
+# CRE WORKFLOW SETTINGS FILE
+# ==========================================================================
+# Session Evaluator workflow for PureSapiens.
+# Evaluates closed chat sessions and assigns training data to AI models
+# via decentralized consensus on Chainlink CRE.
+
+# ==========================================================================
+staging-settings:
+  user-workflow:
+    workflow-name: "session-evaluator-staging"
+  workflow-artifacts:
+    workflow-path: "./main.ts"
+    config-path: "./config.staging.json"
+    secrets-path: "../secrets.yaml"
+
+# ==========================================================================
+production-settings:
+  user-workflow:
+    workflow-name: "session-evaluator-production"
+  workflow-artifacts:
+    workflow-path: "./main.ts"
+    config-path: "./config.production.json"
+    secrets-path: ""
