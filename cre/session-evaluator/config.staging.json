@@ -1,0 +1,9 @@
+{
+  "pinataGatewayUrl": "https://ipfs.io",
+  "openaiModel": "gpt-4o-mini",
+  "scoreThreshold": 70,
+  "chainSelectorName": "ethereum-testnet-sepolia",
+  "trainingDataManagerAddress": "0x80A8426989f150Ef54540C59276206E874845bb0",
+  "modelRegistryAddress": "0x72ddB4Ede8f2CF24bc5907C3D75F595c9F21c579",
+  "gasLimit": "1000000"
+}
