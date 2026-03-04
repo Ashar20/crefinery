@@ -1,0 +1,6 @@
+{
+  "chainSelectorName": "ethereum-testnet-sepolia",
+  "finetuneProofRegistryAddress": "0x0102B61418B70973eAAe5A33F297222399eb1CCF",
+  "modelRegistryAddress": "0x72ddB4Ede8f2CF24bc5907C3D75F595c9F21c579",
+  "gasLimit": "500000"
+}
