@@ -1,0 +1,21 @@
+# Session Evaluator
+cd ~/Documents/GitHub/puresapiens/cre && cre workflow simulate session-evaluator \
+  -T staging-settings \
+  --non-interactive \
+  --trigger-index 0 \
+  --broadcast \
+  --http-payload '{"cid":"QmPEhnqnjoTjWXr6miamxDCrstd2EVZvqevUebv6erkqDg","encryptionKey":"","iv":"","authTag":"","sessionId":"session-puresapiens-001"}'
+
+# Proof Generator
+cd ~/Documents/GitHub/puresapiens/cre && cre workflow simulate proof-generator \
+  -T staging-settings \
+  --non-interactive \
+  --trigger-index 0 \
+  --broadcast \
+  --http-payload '{"modelId":"model-0","sessionHashes":["0xababababababababababababababababababababababababababababababab01","0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd02"],"timestampMs":1709856000000}'
+
+# Deployed Contracts (Sepolia)
+# ModelRegistry:          0x72ddB4Ede8f2CF24bc5907C3D75F595c9F21c579
+# AccessControl:          0x69738E4Bbf8691D1177d45c5701446683E4A2Bcb
+# FinetuneProofRegistry:  0x0102B61418B70973eAAe5A33F297222399eb1CCF
+# TrainingDataManager:    0x80A8426989f150Ef54540C59276206E874845bb0
