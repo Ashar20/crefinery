@@ -2,15 +2,7 @@
 
 ### Human-Verified AI Training Through Decentralized Consensus
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-
-**PureSapiens** is a decentralized AI training platform that guarantees only human-generated data trains AI models. World ID verification ensures every training session originates from a real human. Chainlink CRE runs multi-stage session evaluation and proof generation across independent oracle nodes, eliminating single points of trust.
-
-**Key Differentiators:**
-- **Humans Only**: World ID verification gates all platform interactions — bots cannot contribute training data
-- **Decentralized Evaluation**: Chainlink CRE evaluates sessions across multiple independent nodes, no single party decides what trains a model
-- **On-Chain Proofs**: Every training operation produces a cryptographic proof verified and stored immutably on EVM
-- **Nullifier Tracking**: Each training data entry is linked to a World ID nullifier hash, enabling per-session human verification audits
+**PureSapiens** is a decentralized AI training platform where **Chainlink CRE (Compute Runtime Environment)** orchestrates multi-stage session evaluation and proof generation across independent oracle nodes, while **World ID** ensures every piece of training data originates from a verified human. Together, they create the first trustless, human-only AI training pipeline.
 
 ---
 
@@ -22,43 +14,100 @@ AI models are trained on data of unknown origin. There is no guarantee that trai
 
 ## How PureSapiens Solves It
 
-### World ID — Human Verification
+### Chainlink CRE — The Core Engine
 
-Every user must pass World ID verification before interacting with the platform. The verification flow:
+CRE is the backbone of PureSapiens. Every training data decision is made by a **decentralized network of oracle nodes** running deterministic workflows — no centralized backend, no single point of trust.
 
-1. User connects EVM wallet and opens the chatbot or admin page
-2. **VerificationGate** blocks access until World ID proof is completed
-3. IDKit widget generates a zero-knowledge proof of personhood
-4. Nullifier hash extracted and persisted per wallet address in localStorage
-5. Nullifier hash travels with every session — stored alongside training data on-chain
+PureSapiens implements a **two-stage CRE pipeline**:
 
-This means every training session can be independently verified as originating from a unique human. The nullifier hash is a deterministic, privacy-preserving identifier — it proves humanness without revealing identity.
+#### Stage 1: Session Evaluator (`cre/session-evaluator`)
 
-### Chainlink CRE — Decentralized Session Evaluation
+When a chat session closes, the CRE Session Evaluator workflow triggers across multiple independent oracle nodes:
 
-Session evaluation runs as a multi-stage workflow on Chainlink CRE, distributed across independent oracle nodes:
+1. **Consensus Fetch** — All CRE nodes independently fetch the encrypted session from IPFS. The `identical` aggregation function ensures every node works with the exact same data
+2. **Decrypt & Redact** — Each node decrypts the session (AES-256-GCM) and strips PII (emails, phones, card numbers, IDs)
+3. **AI Evaluation** — Using `ConfidentialHTTPClient` (secrets never leave the CRE enclave), each node calls OpenAI to summarize the session and score its relevance (0-100) against registered models
+4. **On-Chain Assignment** — If the relevance score exceeds the threshold (default: 70), the CRE DON reaches consensus and calls `TrainingDataManager.assignTrainingData()` on-chain via `EVMClient`
 
-**Stage 1: Session Evaluator** (runs on CRE nodes)
-- Receives closed session data (CID from IPFS)
-- AI-powered analysis scores session relevance against registered models
-- Evaluates topic alignment, data quality, and training potential
-- Produces structured evaluation result with relevance scores per model
+```
+CRE Node A ─┐
+CRE Node B ──┤── Consensus ──→ assignTrainingData(modelId, cid, score)
+CRE Node C ─┘
+```
 
-**Stage 2: Proof Generator** (runs on CRE nodes)
-- Receives evaluated session hashes and model assignments
-- Generates ECDSA proof over the training data batch
-- Submits proof to FinetuneProofRegistry smart contract on-chain
-- Multiple nodes must reach consensus — no single node can fabricate proofs
+No single node decides what data trains a model. The DON must agree.
 
-Each stage runs independently on different CRE nodes. The workflow is defined in declarative YAML and deployed via the CRE CLI. No centralized backend decides what data trains which model.
+#### Stage 2: Proof Generator (`cre/proof-generator`)
 
-### On-Chain Verification
+Once training data is assigned, the CRE Proof Generator creates cryptographic proof:
 
-Solidity smart contracts provide the trust layer:
+1. **Model Verification** — CRE nodes call `ModelRegistry.getModel()` to verify the target model exists
+2. **Proof Hash** — Compute `keccak256(abi.encodePacked(modelId, timestampMs, sessionHashes[]))`
+3. **DON Consensus Report** — `runtime.report()` triggers multi-node threshold signing. Multiple independent nodes must agree on and sign the `storeProof` transaction
+4. **On-Chain Submission** — `EVMClient.writeReport()` submits the consensus-signed transaction to `FinetuneProofRegistry`
 
-- **ModelRegistry**: Model registration, metadata, and training data assignments
-- **AccessControl**: Encryption policies and allowlist management
-- **FinetuneProofRegistry**: Stores ECDSA proofs with timestamp validation (24-hour window), queryable by model ID
+```
+CRE Node A signs ─┐
+CRE Node B signs ──┤── Threshold Signature ──→ storeProof(modelId, timestamp, hashes, signature)
+CRE Node C signs ─┘
+```
+
+The proof is **immutable and publicly queryable**. Anyone can verify that training was properly evaluated by a decentralized network.
+
+#### Why CRE Matters Here
+
+| Without CRE | With CRE |
+|---|---|
+| Single server decides what data trains models | Multiple independent nodes must reach consensus |
+| Proofs signed by one key (forgeable) | Threshold signatures require DON agreement |
+| API keys exposed in backend code | `ConfidentialHTTPClient` keeps secrets in CRE enclave |
+| Training assignments can be manipulated | On-chain transactions require multi-node consensus |
+| No verifiable computation | Deterministic workflows, auditable on-chain |
+
+#### CRE Capabilities Used
+
+- **`HTTPClient`** — Consensus-based IPFS fetches (all nodes must see the same data)
+- **`ConfidentialHTTPClient`** — Secure API calls with secrets that never leave CRE enclaves
+- **`EVMClient`** — On-chain contract calls with DON consensus signing
+- **`CronCapability`** — Scheduled workflow triggers
+- **Consensus Aggregation** — `identical` mode ensures all nodes agree on intermediate results
+- **`runtime.report()`** — Threshold signature generation for on-chain proof submission
+
+### World ID — Human Verification Gate
+
+World ID provides the Sybil-resistance layer. Every user must prove they are human before any interaction:
+
+1. User connects EVM wallet and hits a **VerificationGate**
+2. IDKit widget generates a **zero-knowledge proof** of personhood on the user's device
+3. Proof verified against World ID v4 API — no personal data transmitted
+4. A **nullifier hash** (unique, deterministic, privacy-preserving) is extracted and stored per wallet
+5. The nullifier hash travels with every session into the CRE pipeline and is recorded on-chain alongside training data
+
+This means every training session can be independently verified as originating from a unique human — without revealing who that human is.
+
+### World ID + CRE: The Combined Effect
+
+The combination creates a closed loop of trust:
+
+```
+Human (World ID) → Nullifier Hash → Chat Session → IPFS
+     ↓
+CRE Session Evaluator (multi-node consensus)
+     ↓ score >= 70
+TrainingDataManager.assignTrainingData(modelId, cid, score) ← on-chain
+     ↓
+CRE Proof Generator (DON threshold signing)
+     ↓
+FinetuneProofRegistry.storeProof(modelId, timestamp, hashes, signature) ← on-chain
+     ↓
+Anyone can audit: proof → session hashes → CIDs → nullifier hashes → verified humans
+```
+
+- **World ID** guarantees the data source is human
+- **CRE** guarantees the evaluation is decentralized and untampered
+- **On-chain proofs** guarantee the record is immutable and publicly verifiable
+
+No bots. No centralized gatekeepers. No trust assumptions.
 
 ---
 
@@ -67,21 +116,21 @@ Solidity smart contracts provide the trust layer:
 ```
 +------------------------------------------------------------------+
 |                      HUMAN VERIFICATION                           |
-|  World ID (IDKit) → Nullifier Hash → Stored per Wallet           |
+|  World ID (IDKit) -> Nullifier Hash -> Stored per Wallet          |
 |  VerificationGate blocks all access until proof passes            |
 +-----------------------------+------------------------------------+
                               |
                               v
 +------------------------------------------------------------------+
 |                      USER INTERACTION                             |
-|  Frontend (Next.js) ←→ WebSocket ←→ Server ←→ AI Inference       |
+|  Frontend (Next.js) <-> WebSocket <-> Server <-> AI Inference     |
 |  Nullifier hash attached to every session                        |
 +-----------------------------+------------------------------------+
                               |
                               v
 +------------------------------------------------------------------+
 |                    STORAGE LAYER                                   |
-|  * Session data → IPFS (Pinata)                                  |
+|  * Session data -> IPFS (Pinata)                                  |
 |  * CID + nullifier hash stored with model training data          |
 |  * AES-256-GCM encryption for sensitive payloads                 |
 +-----------------------------+------------------------------------+
@@ -90,15 +139,18 @@ Solidity smart contracts provide the trust layer:
 +------------------------------------------------------------------+
 |                 CRE EVALUATION LAYER                              |
 |  Stage 1: Session Evaluator (multi-node consensus)               |
-|    → AI relevance scoring against registered models              |
+|    -> Fetch from IPFS, decrypt, redact PII, score relevance      |
+|    -> DON consensus on TrainingDataManager.assignTrainingData()   |
 |  Stage 2: Proof Generator (multi-node consensus)                 |
-|    → ECDSA proof generation + on-chain submission                |
+|    -> Verify model, compute proof hash, DON threshold signing    |
+|    -> Submit storeProof() via EVMClient.writeReport()            |
 +-----------------------------+------------------------------------+
                               |
                               v
 +------------------------------------------------------------------+
 |                  ON-CHAIN VERIFICATION                            |
 |  * ModelRegistry (model data + training assignments)             |
+|  * TrainingDataManager (CRE-assigned training sessions)          |
 |  * FinetuneProofRegistry (ECDSA proofs, timestamp validation)    |
 |  * AccessControl (allowlists, encryption policies)               |
 |  * All proofs immutable and publicly queryable                   |
@@ -109,100 +161,90 @@ Solidity smart contracts provide the trust layer:
 
 1. **Verify** — User connects wallet, passes World ID verification, nullifier hash stored
 2. **Chat** — User selects a model and chats via WebSocket. Session recorded with nullifier hash
-3. **Store** — Session closes, data uploaded to IPFS via Pinata, CID recorded
-4. **Evaluate** — CRE Session Evaluator workflow triggers across oracle nodes, scores session relevance per model
-5. **Assign** — High-relevance sessions assigned to models as training data (CID + nullifier)
-6. **Prove** — CRE Proof Generator creates ECDSA proof over training batch, submits to chain
-7. **Audit** — Anyone can query on-chain proofs and verify each training session traces back to a World ID nullifier (a real human)
+3. **Store** — Session closes, encrypted with AES-256-GCM, uploaded to IPFS via Pinata
+4. **Evaluate (CRE)** — Session Evaluator workflow triggers across oracle nodes. Nodes fetch, decrypt, redact PII, summarize, and score relevance. DON consensus assigns high-quality sessions to models on-chain
+5. **Prove (CRE)** — Proof Generator creates ECDSA proof over training batch via DON threshold signing, submits to `FinetuneProofRegistry`
+6. **Audit** — Anyone queries on-chain proofs and traces each training session back to a World ID nullifier (a verified human)
+
+---
+
+## Smart Contracts
+
+| Contract | Purpose |
+|---|---|
+| **ModelRegistry** | Register AI models with metadata, Dockerfile hashes, and server allowlists |
+| **TrainingDataManager** | Store CRE-assigned training data (CID + score) per model. Only CRE forwarder or owner can write |
+| **FinetuneProofRegistry** | Store ECDSA proofs with 24-hour timestamp validation. Verify signatures recover to CRE DON signer |
+| **AccessControl** | Fine-grained encryption policies for model data access |
 
 ---
 
 ## Technology Stack
 
-### Frontend
-- **Next.js 16** (App Router) with React 19
-- **wagmi + viem** (EVM wallet integration)
-- **RainbowKit** (wallet UI)
-- **World ID / IDKit** (human verification with nullifier tracking)
-- **WebSocket client** for real-time chat
-
-### Server
-- **Node.js** with Express + WebSocket + TypeScript
-- **ethers.js v6** (EVM contract interaction)
-- **Pinata** (IPFS storage for session data)
-- **AES-256-GCM** encryption
-
-### Smart Contracts
-- **Solidity 0.8.24** with Foundry
-- **ModelRegistry** — model registration, training data assignments
-- **AccessControl** — encryption policies, allowlists
-- **FinetuneProofRegistry** — on-chain ECDSA proof storage with timestamp validation
-
-### Chainlink CRE
-- **Session Evaluator** — multi-node AI-powered session relevance scoring
-- **Proof Generator** — multi-node ECDSA proof generation and on-chain submission
-- Workflows defined in YAML, deployed via CRE CLI
-
-### Storage
-- **IPFS / Pinata** (session data)
-- **EVM blockchain** (proofs, metadata, access control)
+| Layer | Tech |
+|---|---|
+| **CRE Workflows** | Chainlink CRE SDK, TypeScript, viem, zod, consensus aggregation |
+| **Frontend** | Next.js 16, React 19, wagmi, viem, RainbowKit, World ID IDKit |
+| **Server** | Node.js, Express, WebSocket (ws), ethers.js v6, Pinata IPFS |
+| **Contracts** | Solidity 0.8.24, Foundry, OpenZeppelin (Ownable, ECDSA) |
+| **Storage** | IPFS (Pinata), EVM blockchain (Sepolia / Mainnet) |
 
 ---
 
-## Installation
+## Project Structure
 
-### Prerequisites
-
-- **Node.js 18+**
-- **Foundry** (for smart contracts)
-- **CRE CLI** (for Chainlink workflows)
-
-### Quick Start
-
-```bash
-# 1. Clone repository
-git clone https://github.com/philotheephilix/puresapiens.git
-cd puresapiens
-
-# 2. Install dependencies
-cd server && npm install
-cd ../frontend && npm install
-
-# 3. Deploy smart contracts
-cd ../contracts
-forge install
-forge build
-forge script script/Deploy.s.sol --broadcast --rpc-url $EVM_RPC_URL
-
-# 4. Configure environment
-cd ../server
-cp env.template .env
-# Edit .env with contract addresses, RPC URL, Pinata keys
-
-# 5. Configure frontend
-cd ../frontend
-cp .env.example .env.local
-# Edit .env.local with World ID app ID, RP ID, signing key
-
-# 6. Start server (REST API + WebSocket)
-cd ../server && npm run dev &
-
-# 7. Start frontend
-cd ../frontend && npm run dev
+```
+crefinery/
+├── cre/                       # Chainlink CRE workflows (core engine)
+│   ├── project.yaml           # CRE project config (RPCs, chains)
+│   ├── session-evaluator/     # Stage 1: Multi-node session scoring
+│   │   ├── workflow.ts        # Fetch → Decrypt → Redact → Score → Assign
+│   │   ├── workflow.yaml      # CRE workflow definition
+│   │   └── config.staging.json
+│   ├── proof-generator/       # Stage 2: Multi-node proof generation
+│   │   ├── workflow.ts        # Verify → Hash → DON Report → Submit
+│   │   ├── workflow.yaml
+│   │   └── config.staging.json
+│   ├── my-workflow/           # General-purpose CRE workflow
+│   └── contracts/             # ABI bindings for CRE ↔ EVM interaction
+├── contracts/                 # Solidity smart contracts (Foundry)
+│   ├── src/                   # ModelRegistry, AccessControl, FinetuneProofRegistry, TrainingDataManager
+│   ├── test/                  # Foundry tests
+│   └── script/                # Deployment scripts
+├── frontend/                  # Next.js 16 UI
+│   ├── components/            # VerificationGate, Terminal, MatrixRain
+│   ├── contexts/              # WorldVerificationProvider
+│   ├── hooks/                 # useWebSocketChat
+│   └── app/                   # Pages (chatbot, admin, verify)
+└── server/                    # Node.js backend
+    └── src/
+        ├── routes/            # REST API (models, triggers, local-cre)
+        ├── services/          # EVM, Encryption, Session, Model, Pinata, Wallet
+        └── ws/                # WebSocket server
 ```
 
-**Access at:** http://localhost:3000
+---
 
-### CRE Workflow Deployment
+## Quick Start
 
 ```bash
-# Deploy session evaluator
-cd cre/session-evaluator
-cre workflow deploy -T staging-settings
+# Clone
+git clone https://github.com/Ashar20/crefinery.git
+cd crefinery
 
-# Deploy proof generator
-cd ../proof-generator
-cre workflow deploy -T staging-settings
+# Deploy smart contracts
+cd contracts && forge install && forge build
+forge script script/Deploy.s.sol --broadcast --rpc-url $RPC_URL
+
+# Start server
+cd ../server && npm install && npm run dev
+
+# Start frontend
+cd ../frontend && npm install && npm run dev
+
+# Deploy CRE workflows
+cd ../cre/session-evaluator && cre workflow deploy -T staging-settings
+cd ../proof-generator && cre workflow deploy -T staging-settings
 ```
 
 ---
@@ -210,88 +252,31 @@ cre workflow deploy -T staging-settings
 ## Usage
 
 ### For Users
-
-1. **Connect Wallet** — Visit `/chatbot`, connect your EVM wallet
-2. **Verify Humanity** — Complete World ID verification (one-time per wallet)
-3. **Chat** — Select a model and chat in real-time
-4. **Automatic** — Your session is evaluated by CRE nodes and assigned to relevant models if high quality. Your nullifier hash proves it came from a real human
+1. Connect wallet at `/chatbot`
+2. Complete World ID verification (one-time per wallet)
+3. Chat with AI models in real-time
+4. Sessions are automatically evaluated by CRE nodes and assigned to relevant models
 
 ### For Model Providers
-
-1. **Register Model** — Navigate to `/admin/register-model`, define model metadata and training focus areas
-2. **View Training Data** — See auto-assigned sessions, each linked to a World ID nullifier
-3. **Verify Proofs** — Query on-chain proofs via `GET /models/:id/proofs`
-4. **Audit Humanness** — Verify training data nullifiers via `GET /models/:id/training-data/verify`
-
----
-
-## API
-
-### REST Endpoints
-
-```
-GET  /health                              - Health check
-GET  /models                              - List all models
-GET  /models/:id                          - Get model details
-GET  /models/:id/training-data            - Get training sessions
-GET  /models/:id/training-data/verify     - Verify human origin of training data
-GET  /models/:id/proofs                   - Get on-chain fine-tuning proofs
-POST /models                              - Register new model
-PUT  /models/:id/training-data            - Add training data (with nullifierHash)
-```
-
-### WebSocket Protocol
-
-```javascript
-// Client → Server
-{ type: 'authenticate', walletAddress: string, signature: string }
-{ type: 'create_session', sessionId: string, nullifierHash: string }
-{ type: 'message', sessionId: string, content: string }
-{ type: 'close_session', sessionId: string }
-
-// Server → Client
-{ type: 'challenge', challenge: string }
-{ type: 'system', content: string }
-{ type: 'message', content: string, timestamp: string }
-```
+1. Register model at `/admin/register-model`
+2. View auto-assigned training data (each linked to a World ID nullifier)
+3. Trigger proof generation — CRE DON creates on-chain cryptographic proof
+4. Share proof IDs for public auditability
 
 ---
 
-## Project Structure
-
-```
-puresapiens/
-├── frontend/              # Next.js 16 UI (wagmi + RainbowKit + World ID)
-│   ├── components/        # VerificationGate, CyberConnectButton
-│   ├── contexts/          # WorldVerificationProvider
-│   └── app/               # Pages (chatbot, admin, verify)
-├── server/                # Unified Node.js server (Express + WebSocket)
-│   └── src/               # Routes, services, WebSocket handler
-├── contracts/             # Solidity smart contracts (Foundry)
-│   ├── src/               # ModelRegistry, AccessControl, FinetuneProofRegistry
-│   ├── test/              # Foundry tests
-│   └── script/            # Deployment scripts
-└── cre/                   # Chainlink CRE workflows
-    ├── session-evaluator/ # Multi-node session relevance scoring
-    └── proof-generator/   # Multi-node proof generation + on-chain submission
-```
-
----
-
-## Running Tests
+## Tests
 
 ```bash
-# Smart contract tests
-cd contracts && forge test
-
-# Server tests
-cd server && npm test
+cd contracts && forge test      # Smart contract tests
+cd cre/session-evaluator && npm test  # CRE workflow tests
+cd cre/proof-generator && npm test
 ```
 
 ---
 
 <div align="center">
 
-**PureSapiens** — Humans Train AI. Proof On-Chain.
+**PureSapiens** — Humans Train AI. CRE Verifies. Proof On-Chain.
 
 </div>
